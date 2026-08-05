@@ -1,0 +1,8 @@
+import {
+  "mizchi/quint_connect",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/process",
+  "moonbitlang/core/debug",
+}
+
+supported_targets = "+native"
