@@ -1,129 +1,246 @@
-# Quint Connect pattern in MoonBit
+# quint-connect-moonbit
 
-MoonBit package名は `mizchi/quint_connect`。Quint の model-based testing trace をMoonBit実装へ
-replayする、実動するruntime adapterである。
-公式 `quint-connect` の Rust attribute macro を移植したものではないが、Connect の中核である
-「Quint が生成した action を実装へ適用し、各 step の observable state を比較する」workflow は
-MoonBit で再現できた。
+`quint-connect-moonbit` is an experimental MoonBit runtime adapter for
+[Quint model-based testing](https://quint.sh/docs/model-based-testing). Its MoonBit package name is
+`mizchi/quint_connect`.
 
-## 再現
+[Japanese version](README-ja.md)
 
-repository root で次を実行する。
+The repository connects an executable Quint specification to a MoonBit implementation:
+
+1. Quint generates one or more allowed execution traces.
+2. The adapter reads those traces in Informal Trace Format (ITF).
+3. A domain driver maps each Quint action to an operation in the MoonBit implementation.
+4. After every action, the adapter compares an observable implementation snapshot with the state expected by Quint.
+
+This catches **specification/implementation drift** in generated scenarios. It does not prove that the MoonBit
+implementation is correct for every possible execution.
+
+The project follows the runtime pattern of the official
+[Quint Connect](https://github.com/quint-co/quint-connect) Rust library, but it is not an official port. MoonBit uses
+explicit functions and executable packages here instead of Rust attribute macros and Serde derives.
+
+## Why this repository exists
+
+A model can be correct while production code implements a transition incorrectly. Traditional example-based tests
+usually cover a small number of hand-written scenarios. Model-based testing instead lets Quint generate many valid
+action sequences and expected states from one model.
+
+The important bridge is intentionally explicit:
+
+- **Action mapping:** which implementation operation corresponds to each Quint action?
+- **Input mapping:** how are Quint's nondeterministic choices decoded into implementation arguments?
+- **State projection:** which implementation fields are observable and compared with the model?
+
+Those mappings are application-specific and must be reviewed like any other API contract. This package provides the
+ITF parsing, replay loop, trace generation, diagnostics, and reusable types around that bridge.
+
+## How it works
+
+```text
+Quint specification
+  -> quint run --mbt or quint test
+  -> temporary ITF JSON traces
+  -> parse_itf_with_config
+  -> fresh MoonBit driver for each trace
+  -> apply(action, nondet_picks)
+  -> project(driver)
+  -> compare with expected Quint state
+```
+
+For `quint run --mbt`, Quint records two fields that the default parser consumes:
+
+- `mbt::actionTaken`: the action selected for the step
+- `mbt::nondetPicks`: values selected by relevant `nondet` expressions
+
+The adapter also supports named `quint test` traces that store their observable state and action data at custom nested
+paths. The OrderCheckout example demonstrates that contract.
+
+## Quick start
+
+Requirements:
+
+- the MoonBit toolchain installed at `~/.moon/bin`
+- Nix with flakes enabled, or local installations of Quint 0.32, `just`, and `rg`
+
+Run the complete validation suite from the repository root:
 
 ```sh
 nix develop -c just check
 ```
 
-MoonBit toolchainはhostの `~/.moon/bin` を使う。devShellはQuint 0.32、just、rgなどintegration
-controlに必要なtoolを提供する。すでに `moon` と `quint` がPATHにある場合は `just check` だけでもよい。
-
-このtaskはformatter、typecheck、14 unit testsに加えて、次のpositive / negative controlを実行する。
-
-- OrderCheckout: generated 8 traces / 34 statesとnested named test 1 trace / 2 states
-- BankAccount: nondeterministic amountを含む8 traces / 72 states
-- CommandSink: statelessな8 traces / 72 actions
-- 各exampleで意図的に壊したdriverが`StateDiverged`または`DriverRejected`になること
-
-CLIを直接使う場合は次のようになる。
+If all tools are already available on `PATH`:
 
 ```sh
-moon run examples/order_checkout/cmd run \
-  examples/order_checkout/OrderCheckout.qnt \
-  --main OrderCheckout --max-samples 8 --max-steps 8 --seed 0x1234
-
-moon run examples/order_checkout/cmd test \
-  examples/order_checkout/OrderCheckoutNamed.qnt \
-  --main OrderCheckoutNamed --test cancelTest \
-  --state-path model --nondet-path actionTaken --seed 0x1234
+just check
 ```
 
-CLI seed、`QUINT_SEED`、自動生成seedの順に優先する。`QUINT_VERBOSE=1` でtraceごとの
-action列を表示し、`--keep-traces` で一時ITFを残せる。backendのdefaultは
-`typescript` で、`--backend rust` も指定できる。
+The command runs formatting checks, MoonBit type checking, 14 unit tests, Quint type checking, and all example
+integration controls. With the fixed seed used by this repository, the integration suite checks:
 
-## 構成
-
-```text
-connect run/test
-  -> RunConfig / TestConfig
-  -> MoonBit async process runner
-  -> quint run --mbt / quint test
-  -> temporary ITF files
-  -> configurable state/action projection
-  -> fresh MoonBit driver per trace
-  -> action apply -> state project -> expected state compare
-```
-
-| 層 | ファイル | 責務 |
+| Example | Positive control | Negative control |
 |---|---|---|
-| contract | `adapter.mbt` | ITF、trace設定、replay結果、失敗境界の型 |
-| generator | `generator.mbt` | `run` / `test` 引数、backend、seedの検証 |
-| process | `runner/runner.mbt` | Quint起動、一時directory、複数ITFの収集とdecode |
-| replay kernel | `adapter.mbt` | action適用、state projection、stepごとの一致判定 |
-| examples | `examples/*/driver.mbt` | domain action/stateとMoonBit実装の対応 |
-| example CLI | `examples/*/cmd/main.mbt` | trace生成、replay、診断を含む実行sample |
+| OrderCheckout simulation | 8 traces / 34 states | cancellation produces the wrong terminal state |
+| OrderCheckout named test | 1 trace / 2 states | the same cancellation drift through custom paths |
+| BankAccount | 8 traces / 72 states | withdrawal debits twice the selected amount |
+| CommandSink | 8 traces / 72 actions | the implementation omits the `reset` mapping |
 
-libraryとして参照するときのimport pathは `mizchi/quint_connect`、runner packageは
-`mizchi/quint_connect/runner` である。
+These counts are deterministic regression fixtures, not coverage or proof claims.
 
-各traceは新しいdriverから開始する。失敗は `TraceDecode`、`DriverRejected`、
-`StateDiverged`、suite内の `TraceFailed`、Quint process errorに分け、model、mapping、
-implementationのどの境界で失敗したかを残す。
+## Repository layout
+
+| Path | Responsibility |
+|---|---|
+| [`adapter.mbt`](adapter.mbt) | ITF types, parsing, path projection, replay, and error boundaries |
+| [`generator.mbt`](generator.mbt) | validated `quint run` and `quint test` command construction plus seed precedence |
+| [`runner/`](runner/) | native async Quint process execution and temporary ITF collection |
+| [`examples/`](examples/) | complete Quint spec + MoonBit driver + executable + negative-control samples |
+| [`scripts/check.sh`](scripts/check.sh) | end-to-end regression controls for every example |
+| [`justfile`](justfile) | reproducible formatting, type-checking, unit-test, and integration tasks |
+
+The reusable package is `mizchi/quint_connect`. Process execution is separated into the native-only
+`mizchi/quint_connect/runner` package so that the replay kernel remains portable and can be unit-tested on the JS
+target.
+
+## Core API
+
+### Trace parsing
+
+- `parse_itf(text)` parses standard `quint run --mbt --out-itf` output.
+- `parse_itf_with_config(text, config)` additionally projects nested state and custom action data.
+- `TraceConfig.state_path` selects the model state that should be decoded by the domain adapter.
+- `TraceConfig.nondet_path` selects a custom Quint variant containing the action tag and its arguments.
+- `required_nondet` and `optional_nondet` decode named choices after Quint `Some`/`None` normalization.
+
+The parser deliberately keeps domain state as `Json`. Every domain adapter must explicitly decode the fields it
+compares. This avoids pretending that an unreviewed automatic conversion is part of the trusted contract.
+
+### Stateful replay
+
+`replay` operates on one trace. `replay_suite` operates on multiple traces and constructs a fresh driver for each one.
+Both use the same three callbacks:
+
+```moonbit
+apply    : (Driver, String, Json) -> Result[Driver, String]
+project  : (Driver) -> Snapshot
+expected : (Json) -> Result[Snapshot, String]
+```
+
+After every trace state, `apply` executes the selected action, `project` extracts the implementation snapshot, and
+`expected` decodes the corresponding Quint snapshot. The two snapshots must implement `Eq` and `Debug` and must be
+equal at every step.
+
+### Stateless replay
+
+`replay_stateless` executes every action without comparing implementation state. It is useful for command dispatchers,
+API clients, and other adapters where only action mapping is observable. It still reports rejected or unknown actions,
+but it cannot detect state drift. Prefer stateful replay whenever a meaningful snapshot is available.
+
+### Trace generation
+
+- `RunConfig` describes randomized simulation with `quint run --mbt`.
+- `TestConfig` describes a named scenario selected with `quint test --match`.
+- `runner.generate_run` and `runner.generate_test` start Quint, collect all generated ITF files, and parse them.
+- CLI seed precedence is explicit: command-line seed, then `QUINT_SEED`, then a generated seed.
+
+The example executables use the TypeScript simulator backend by default. `--backend rust` is accepted by the
+OrderCheckout CLI, but the TypeScript backend is the reproducible baseline tested by this repository.
+
+## Failure model
+
+Failures are separated by boundary so that a red test identifies what kind of contract broke:
+
+| Error | Meaning |
+|---|---|
+| `TraceDecode` | ITF structure, configured path, metadata, or expected-state decoding is invalid |
+| `DriverRejected` | the MoonBit driver cannot execute the Quint action or decode its arguments |
+| `StateDiverged` | the action ran, but the projected MoonBit state differs from the Quint state |
+| `TraceFailed` | one trace in a multi-trace suite failed; the trace index is preserved |
+| process error | Quint failed, generated no traces, or an ITF file could not be read |
+
+The integration suite includes deliberate failures for both `DriverRejected` and `StateDiverged`. A positive-only test
+would not demonstrate that the mapping and comparison remain load-bearing.
 
 ## Examples
 
-用途別のsampleは[`examples/`](examples/)にまとめた。
+See the [examples guide](examples/) for a feature-oriented overview.
 
-| Example | 示す機能 | 実測control |
-|---|---|---|
-| [`OrderCheckout`](examples/order_checkout/) | lifecycle、set / variant、generated / named trace、nested path | 8 traces / 34 states、named 1 trace / 2 states |
-| [`BankAccount`](examples/bank_account/) | nondeterministic integer、ITF `#bigint`、state projection | 8 traces / 72 states |
-| [`CommandSink`](examples/command_sink/) | stateless action mapping | 8 traces / 72 actions |
-
-## 公式 Connect との対応
-
-| 公式側の概念・機能 | MoonBit版 | 備考 |
-|---|---|---|
-| `Driver::step` | 対応 | callbackでactionとnondeterministic picksを実装へ適用 |
-| `State::from_driver` | 対応 | projection callbackでobservable stateだけを比較 |
-| `#[quint_run]` | 対応 | `connect run` / `RunConfig` という明示API |
-| `#[quint_test]` | 対応 | `connect test` / `TestConfig` とcustom action path |
-| `switch!` / pick decode | 部分対応 | action matchと `required_nondet` / `optional_nondet` |
-| Quint processからtrace生成 | 対応 | native async process runnerを使用 |
-| 複数trace replay | 対応 | traceごとにfresh driverを生成して集計 |
-| nested state / nondet path | 対応 | `--state-path` / `--nondet-path` |
-| `QUINT_SEED` | 対応 | CLI seedを最優先し、失敗時に再現方法を表示 |
-| `QUINT_VERBOSE` | 部分対応 | action列を表示。公式と同じ詳細loggerではない |
-| stateless driver | 対応 | `replay_stateless`を提供 |
-| typed ITF decode | 部分対応 | boundaryは`Json`で、domain adapterが明示decode |
-| Rust attribute macro / derive | 非対応 | MoonBitではCLIと通常関数を明示的に呼ぶ |
-
-## 分かった制約
-
-- replay kernelはgenericだが、action mappingとstate projectionは対象実装ごとに書く必要がある。
-  `examples/`ではstateful、nested/custom action、statelessの3パターンを示す。
-- MoonBit core JSONのnumberは`Double`を経由する。`2^53`を超える整数を正確に比較する用途では、
-  ITF boundaryに別decoderまたは文字列表現が必要になる。
-- Quintのset、map、tuple、variantはraw JSONとして保持できるが、RustのSerde相当の自動変換はない。
-- action適用は同期callbackである。実network、clock、並行I/Oを含むdriverの評価は未実施である。
-- compile-time attribute macro、trace shrinking、網羅性の証明はscope外である。有限個の生成traceに
-  対するconformance testであり、formal verificationそのものではない。
-- process runnerはMoonBit native async、replay kernelのunit testはJS targetで確認している。
-- Quint 0.32のRust backendでは、multi-trace出力の初期actionが一部 `init` ではなく `step` と
-  表示されるケースを観測した。再現性のあるcontractを優先し、このCLIはTypeScript backendを
-  defaultにしている。
-
-## 評価
-
-| 項目 | 結果 |
+| Example | What it teaches |
 |---|---|
-| source | Quint公式model-based testing documentationと公式`quint-connect`実装 |
-| observation | OrderCheckout、BankAccount、CommandSinkの全generated/named traceが一致 |
-| negative control | state drift 2経路とcommand mapping欠落を検出 |
-| decision | runtime adapter patternはMoonBitでも採用可能。macro/derive互換は目標にしない |
-| trust boundary | Quint spec、action mapping、state projection、ITF decoder |
-| lock | fixed seed `0x1234` とpositive / negative controlをCI taskに固定 |
+| [OrderCheckout](examples/order_checkout/) | lifecycle transitions, sets and variants, nondeterministic item selection, generated traces, named traces, and nested projections |
+| [BankAccount](examples/bank_account/) | integer arguments from nondeterministic choices, Quint `#bigint` decoding, and a minimal state projection |
+| [CommandSink](examples/command_sink/) | stateless action replay and detection of an incomplete command mapping |
 
-Connect の価値はadapterの薄さではなく、specと実装の対応関係を明示的なcontractとしてCIで
-継続検査できることにある。一方でprojectionを間違えると誤った安心につながるため、正常系だけでなく
-意図的なstate driftを必ず同じfixtureで検出する。
+Each example contains:
+
+- an executable Quint model (`*.qnt`)
+- a MoonBit driver that maps actions and decodes expected state
+- a runnable native executable under `cmd/`
+- MoonBit contract tests
+- a deliberate broken mode used by the integration script
+
+## Relationship to official Quint Connect
+
+| Official Rust concept | This MoonBit package | Status |
+|---|---|---|
+| `Driver::step` | `apply` callback | supported |
+| `State::from_driver` | `project` callback | supported |
+| generated simulation traces | `RunConfig` + `runner.generate_run` | supported |
+| named scenario traces | `TestConfig` + custom trace paths | supported |
+| multiple traces | `replay_suite` with a fresh driver per trace | supported |
+| nondeterministic value helpers | `required_nondet` / `optional_nondet` | supported manually |
+| unit-state driver | `replay_stateless` | supported |
+| `QUINT_SEED` | explicit seed resolution and reproduction output | supported |
+| Rust `switch!` macro | ordinary MoonBit pattern matching | manual equivalent |
+| Rust attribute macros | explicit config and executable code | not implemented |
+| Serde-derived typed ITF conversion | domain-specific JSON decoding | not implemented |
+| trace shrinking | — | not implemented |
+
+## Guarantees and limitations
+
+What a passing suite means:
+
+- every generated trace was accepted by the driver;
+- every selected action and nondeterministic input was mapped successfully;
+- every field included in the state projection matched after every checked step.
+
+What it does **not** mean:
+
+- the implementation is formally verified;
+- all possible executions were explored;
+- fields omitted from the projection are correct;
+- real network, clock, concurrency, failure injection, or external I/O semantics were tested;
+- the Quint specification itself correctly represents the intended system.
+
+Additional implementation constraints:
+
+- Quint sets, maps, tuples, and variants remain raw ITF JSON until a domain adapter decodes them.
+- Quint integers are commonly encoded as `{ "#bigint": "..." }`; BankAccount shows an explicit decoder.
+- MoonBit core JSON numbers use `Double`, so integers above `2^53` require a string/`#bigint` decoder rather than a
+  floating-point conversion.
+- Action callbacks are synchronous. Async production operations need an additional driver abstraction.
+- Quint's `--mbt` metadata is documented as experimental and may change between Quint versions.
+
+## Development commands
+
+```sh
+just fmt          # format MoonBit source
+just --fmt        # format the justfile
+just fmt-check    # verify MoonBit formatting
+just typecheck    # MoonBit type checking with warnings denied
+just test         # 14 portable unit/contract tests
+just integration  # generate and replay real Quint traces
+just check        # run everything
+```
+
+## References
+
+- [Quint model-based testing](https://quint.sh/docs/model-based-testing)
+- [Quint CLI and `--mbt` metadata](https://quint.sh/docs/quint)
+- [Official Quint Connect for Rust](https://github.com/quint-co/quint-connect)
+- [Quint Connect announcement](https://quint.sh/posts/quint_connect)
+- [Informal Trace Format](https://apalache-mc.org/docs/adr/015adr-trace.html)
+
+## License
+
+Apache-2.0. See [`LICENSE`](LICENSE).
