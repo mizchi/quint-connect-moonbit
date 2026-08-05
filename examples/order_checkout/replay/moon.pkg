@@ -1,11 +1,10 @@
 import {
   "mizchi/quint_connect",
-  "mizchi/quint_connect/runner",
+  "mizchi/quint_connect/examples/order_checkout",
   "moonbitlang/async",
+  "moonbitlang/async/fs",
   "moonbitlang/core/debug",
   "moonbitlang/core/env",
-  "moonbitlang/core/random",
-  "moonbitlang/core/string",
 }
 
 supported_targets = "+native"

@@ -1,7 +1,8 @@
 import {
   "mizchi/quint_connect",
+  "mizchi/quint_connect/examples/command_sink",
+  "mizchi/quint_connect/runner",
   "moonbitlang/async",
-  "moonbitlang/async/fs",
   "moonbitlang/core/debug",
   "moonbitlang/core/env",
 }

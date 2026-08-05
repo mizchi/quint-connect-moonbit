@@ -46,7 +46,7 @@ fn item_bit(candidate : String) -> Result[Int, String] {
 
 ///|
 fn decode_candidate(picks : Json) -> Result[String, String] {
-  match required_nondet(picks, "candidate") {
+  match @quint_connect.required_nondet(picks, "candidate") {
     Ok(String(value)) => Ok(value)
     Ok(_) => Err("candidate must be a string")
     Err(_) => Err("addItem requires nondet pick candidate")
@@ -220,10 +220,10 @@ fn decode_order_snapshot(value : Json) -> Result[OrderSnapshot, String] {
 
 ///|
 pub fn replay_order(
-  trace : ItfTrace,
+  trace : @quint_connect.ItfTrace,
   driver : OrderDriver,
-) -> Result[ReplaySummary, ConnectError] {
-  replay(
+) -> Result[@quint_connect.ReplaySummary, @quint_connect.ConnectError] {
+  @quint_connect.replay(
     trace,
     driver,
     (driver, action, picks) => driver.apply(action, picks),
@@ -234,10 +234,10 @@ pub fn replay_order(
 
 ///|
 pub fn replay_order_suite(
-  traces : Array[ItfTrace],
+  traces : Array[@quint_connect.ItfTrace],
   broken_cancel? : Bool = false,
-) -> Result[ReplaySuiteSummary, SuiteError] {
-  replay_suite(
+) -> Result[@quint_connect.ReplaySuiteSummary, @quint_connect.SuiteError] {
+  @quint_connect.replay_suite(
     traces,
     () => new_order_driver(broken_cancel~),
     (driver, action, picks) => driver.apply(action, picks),

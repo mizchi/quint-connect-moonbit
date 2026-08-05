@@ -46,38 +46,6 @@ test "ITF decoder preserves action metadata" {
 }
 
 ///|
-test "OrderCheckout driver replays a valid Quint trace" {
-  let trace = @quint_connect.parse_itf(order_trace_fixture()).unwrap()
-  let result = @quint_connect.replay_order(
-    trace,
-    @quint_connect.new_order_driver(),
-  )
-  match result {
-    Ok(summary) => assert_eq(summary.states_checked, 3)
-    Err(error) => fail("expected valid trace, got \{@debug.to_string(error)}")
-  }
-}
-
-///|
-test "state comparison rejects a deliberately broken cancel transition" {
-  let trace = @quint_connect.parse_itf(order_trace_fixture()).unwrap()
-  let result = @quint_connect.replay_order(
-    trace,
-    @quint_connect.new_order_driver(broken_cancel=true),
-  )
-  match result {
-    Err(StateDiverged(index, action, expected, actual)) => {
-      assert_eq(index, 2)
-      assert_eq(action, "cancelCart")
-      assert_true(expected.contains("Cancelled"))
-      assert_true(actual.contains("Refunded"))
-    }
-    Err(error) => fail("unexpected adapter error: \{@debug.to_string(error)}")
-    Ok(_) => fail("the broken implementation must not match the Quint trace")
-  }
-}
-
-///|
 test "ITF decoder rejects a trace without states" {
   match @quint_connect.parse_itf("{\"vars\": []}") {
     Err(TraceDecode(_)) => ()
@@ -98,9 +66,14 @@ test "driver mapping failures stay distinct from state divergence" {
       },
     ],
   }
-  let result = @quint_connect.replay_order(
+  let result = @quint_connect.replay(
     trace,
-    @quint_connect.new_order_driver(),
+    0,
+    (driver, action, _) => {
+      Err("unknown Quint action \{action}; driver=\{driver}")
+    },
+    driver => driver,
+    _ => Ok(0),
   )
   match result {
     Err(DriverRejected(index, action, reason)) => {

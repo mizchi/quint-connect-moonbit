@@ -17,21 +17,22 @@ nix develop -c just check
 MoonBit toolchainはhostの `~/.moon/bin` を使う。devShellはQuint 0.32、just、rgなどintegration
 controlに必要なtoolを提供する。すでに `moon` と `quint` がPATHにある場合は `just check` だけでもよい。
 
-このtaskはformatter、typecheck、unit testに加えて、次のpositive / negative controlを実行する。
+このtaskはformatter、typecheck、14 unit testsに加えて、次のpositive / negative controlを実行する。
 
-- adapter、generator、seed、path projection、multi-trace replay の unit test 11件
-- `quint run --mbt` が生成する8 traces / 34 statesの正常 replay
-- 同じ生成traceに対し、意図的に壊した `cancelCart` が `Cancelled` / `Refunded` の差分で失敗すること
-- `quint test` のnamed testを、nested stateとcustom sum-type actionから1 trace / 2 states replayすること
-- named testでも壊したdriverが失敗すること
+- OrderCheckout: generated 8 traces / 34 statesとnested named test 1 trace / 2 states
+- BankAccount: nondeterministic amountを含む8 traces / 72 states
+- CommandSink: statelessな8 traces / 72 actions
+- 各exampleで意図的に壊したdriverが`StateDiverged`または`DriverRejected`になること
 
 CLIを直接使う場合は次のようになる。
 
 ```sh
-moon run cmd/connect run fixtures/OrderCheckout.qnt \
+moon run examples/order_checkout/cmd run \
+  examples/order_checkout/OrderCheckout.qnt \
   --main OrderCheckout --max-samples 8 --max-steps 8 --seed 0x1234
 
-moon run cmd/connect test fixtures/OrderCheckoutNamed.qnt \
+moon run examples/order_checkout/cmd test \
+  examples/order_checkout/OrderCheckoutNamed.qnt \
   --main OrderCheckoutNamed --test cancelTest \
   --state-path model --nondet-path actionTaken --seed 0x1234
 ```
@@ -59,8 +60,8 @@ connect run/test
 | generator | `generator.mbt` | `run` / `test` 引数、backend、seedの検証 |
 | process | `runner/runner.mbt` | Quint起動、一時directory、複数ITFの収集とdecode |
 | replay kernel | `adapter.mbt` | action適用、state projection、stepごとの一致判定 |
-| domain adapter | `order_driver.mbt` | `OrderCheckout` action/stateとMoonBit実装の対応 |
-| CLI | `cmd/connect/main.mbt` | 明示的な `run` / `test` API、診断、再現seed |
+| examples | `examples/*/driver.mbt` | domain action/stateとMoonBit実装の対応 |
+| example CLI | `examples/*/cmd/main.mbt` | trace生成、replay、診断を含む実行sample |
 
 libraryとして参照するときのimport pathは `mizchi/quint_connect`、runner packageは
 `mizchi/quint_connect/runner` である。
@@ -68,6 +69,16 @@ libraryとして参照するときのimport pathは `mizchi/quint_connect`、run
 各traceは新しいdriverから開始する。失敗は `TraceDecode`、`DriverRejected`、
 `StateDiverged`、suite内の `TraceFailed`、Quint process errorに分け、model、mapping、
 implementationのどの境界で失敗したかを残す。
+
+## Examples
+
+用途別のsampleは[`examples/`](examples/)にまとめた。
+
+| Example | 示す機能 | 実測control |
+|---|---|---|
+| [`OrderCheckout`](examples/order_checkout/) | lifecycle、set / variant、generated / named trace、nested path | 8 traces / 34 states、named 1 trace / 2 states |
+| [`BankAccount`](examples/bank_account/) | nondeterministic integer、ITF `#bigint`、state projection | 8 traces / 72 states |
+| [`CommandSink`](examples/command_sink/) | stateless action mapping | 8 traces / 72 actions |
 
 ## 公式 Connect との対応
 
@@ -89,8 +100,8 @@ implementationのどの境界で失敗したかを残す。
 
 ## 分かった制約
 
-- 実装済みのdomain adapterは `OrderCheckout` のみである。replay kernel自体はgenericだが、
-  action mappingとstate projectionは対象実装ごとに書く必要がある。
+- replay kernelはgenericだが、action mappingとstate projectionは対象実装ごとに書く必要がある。
+  `examples/`ではstateful、nested/custom action、statelessの3パターンを示す。
 - MoonBit core JSONのnumberは`Double`を経由する。`2^53`を超える整数を正確に比較する用途では、
   ITF boundaryに別decoderまたは文字列表現が必要になる。
 - Quintのset、map、tuple、variantはraw JSONとして保持できるが、RustのSerde相当の自動変換はない。
@@ -107,8 +118,8 @@ implementationのどの境界で失敗したかを残す。
 | 項目 | 結果 |
 |---|---|
 | source | Quint公式model-based testing documentationと公式`quint-connect`実装 |
-| observation | generated 8 traces / 34 states、named test 1 trace / 2 statesが一致 |
-| negative control | 両経路で `cancelCart` の `Cancelled` / `Refunded` driftを検出 |
+| observation | OrderCheckout、BankAccount、CommandSinkの全generated/named traceが一致 |
+| negative control | state drift 2経路とcommand mapping欠落を検出 |
 | decision | runtime adapter patternはMoonBitでも採用可能。macro/derive互換は目標にしない |
 | trust boundary | Quint spec、action mapping、state projection、ITF decoder |
 | lock | fixed seed `0x1234` とpositive / negative controlをCI taskに固定 |

@@ -185,7 +185,7 @@ async fn main {
     _ => true
   }
   print_verbose_traces(batch.traces, verbose)
-  let result = @quint_connect.replay_order_suite(
+  let result = @order_checkout.replay_order_suite(
     batch.traces,
     broken_cancel=has_flag(options, "--broken-cancel"),
   )

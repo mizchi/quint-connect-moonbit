@@ -13,9 +13,9 @@ async fn main {
       abort("MoonBit Connect decode failed: \{@debug.to_string(error)}")
   }
   match
-    @quint_connect.replay_order(
+    @order_checkout.replay_order(
       trace,
-      @quint_connect.new_order_driver(broken_cancel~),
+      @order_checkout.new_order_driver(broken_cancel~),
     ) {
     Ok(summary) =>
       println(
