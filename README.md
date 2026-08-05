@@ -1,8 +1,9 @@
 # quint-connect-moonbit
 
-`quint-connect-moonbit` is an experimental MoonBit runtime adapter for
+`quint-connect-moonbit` is a MoonBit implementation of the official
+[quint-connect](https://github.com/quint-co/quint-connect) Rust runtime library for
 [Quint model-based testing](https://quint.sh/docs/model-based-testing). Its MoonBit package name is
-`mizchi/quint_connect`.
+`mizchi/quint_connect`. This project is experimental and is not an official port.
 
 [Japanese version](README-ja.md)
 
@@ -16,9 +17,8 @@ The repository connects an executable Quint specification to a MoonBit implement
 This catches **specification/implementation drift** in generated scenarios. It does not prove that the MoonBit
 implementation is correct for every possible execution.
 
-The project follows the runtime pattern of the official
-[Quint Connect](https://github.com/quint-co/quint-connect) Rust library, but it is not an official port. MoonBit uses
-explicit functions and executable packages here instead of Rust attribute macros and Serde derives.
+Like the Rust library, this implementation replays Quint actions and compares projected implementation state. MoonBit
+uses explicit functions and executable packages here instead of Rust attribute macros and Serde derives.
 
 ## Why this repository exists
 
@@ -75,8 +75,9 @@ If all tools are already available on `PATH`:
 just check
 ```
 
-The command runs formatting checks, MoonBit type checking, 14 unit tests, Quint type checking, and all example
-integration controls. With the fixed seed used by this repository, the integration suite checks:
+The command runs formatting checks, all-target MoonBit type checking, 16 unit/contract tests on JavaScript, Wasm, and
+native, Quint type checking, a Wasm replay executable, and all example integration controls on native. With the fixed seed used by this
+repository, the integration suite checks:
 
 | Example | Positive control | Negative control |
 |---|---|---|
@@ -98,9 +99,9 @@ These counts are deterministic regression fixtures, not coverage or proof claims
 | [`scripts/check.sh`](scripts/check.sh) | end-to-end regression controls for every example |
 | [`justfile`](justfile) | reproducible formatting, type-checking, unit-test, and integration tasks |
 
-The reusable package is `mizchi/quint_connect`. Process execution is separated into the native-only
-`mizchi/quint_connect/runner` package so that the replay kernel remains portable and can be unit-tested on the JS
-target.
+The reusable package is `mizchi/quint_connect`. Its ITF decoder and replay kernel are tested on JavaScript, Wasm, and
+native targets. Process execution is separated into the native-only `mizchi/quint_connect/runner` package. Native
+executables generate traces by starting Quint; the Wasm executable replays ITF supplied by or embedded in its host.
 
 ## Core API
 
@@ -111,6 +112,8 @@ target.
 - `TraceConfig.state_path` selects the model state that should be decoded by the domain adapter.
 - `TraceConfig.nondet_path` selects a custom Quint variant containing the action tag and its arguments.
 - `required_nondet` and `optional_nondet` decode named choices after Quint `Some`/`None` normalization.
+- `decode_itf_bigint` decodes the canonical ITF `#bigint` representation without precision loss.
+- `decode_itf_int` converts an ITF integer only after checking the MoonBit 32-bit `Int` range.
 
 The parser deliberately keeps domain state as `Json`. Every domain adapter must explicitly decode the fields it
 compares. This avoids pretending that an unreviewed automatic conversion is part of the trusted contract.
@@ -143,6 +146,9 @@ but it cannot detect state drift. Prefer stateful replay whenever a meaningful s
 - `runner.generate_run` and `runner.generate_test` start Quint, collect all generated ITF files, and parse them.
 - CLI seed precedence is explicit: command-line seed, then `QUINT_SEED`, then a generated seed.
 
+The runner requires native process and filesystem APIs. A browser or server-side Wasm host must obtain ITF JSON
+separately and pass it to `parse_itf` or `parse_itf_with_config`; replay itself does not require native I/O.
+
 The example executables use the TypeScript simulator backend by default. `--backend rust` is accepted by the
 OrderCheckout CLI, but the TypeScript backend is the reproducible baseline tested by this repository.
 
@@ -168,7 +174,7 @@ See the [examples guide](examples/) for a feature-oriented overview.
 | Example | What it teaches |
 |---|---|
 | [OrderCheckout](examples/order_checkout/) | lifecycle transitions, sets and variants, nondeterministic item selection, generated traces, named traces, and nested projections |
-| [BankAccount](examples/bank_account/) | integer arguments from nondeterministic choices, Quint `#bigint` decoding, and a minimal state projection |
+| [BankAccount](examples/bank_account/) | integer arguments, Quint `#bigint` decoding, a minimal state projection, and embedded-ITF Wasm replay |
 | [CommandSink](examples/command_sink/) | stateless action replay and detection of an incomplete command mapping |
 
 Each example contains:
@@ -178,6 +184,8 @@ Each example contains:
 - a runnable native executable under `cmd/`
 - MoonBit contract tests
 - a deliberate broken mode used by the integration script
+
+BankAccount additionally contains a runnable Wasm executable that replays an embedded trace without the native runner.
 
 ## Relationship to official Quint Connect
 
@@ -215,9 +223,10 @@ What it does **not** mean:
 Additional implementation constraints:
 
 - Quint sets, maps, tuples, and variants remain raw ITF JSON until a domain adapter decodes them.
-- Quint integers are commonly encoded as `{ "#bigint": "..." }`; BankAccount shows an explicit decoder.
-- MoonBit core JSON numbers use `Double`, so integers above `2^53` require a string/`#bigint` decoder rather than a
-  floating-point conversion.
+- ITF requires every integer, large or small, to use `{ "#bigint": "..." }`; JSON numbers are rejected by the decoder.
+- `decode_itf_bigint` uses MoonBit core `BigInt`, preserving values such as `2^53 + 1` on JavaScript, Wasm, and native.
+- `decode_itf_int` is an explicit narrowing operation. Domains that need arbitrary precision should retain `BigInt`
+  instead of converting it.
 - Action callbacks are synchronous. Async production operations need an additional driver abstraction.
 - Quint's `--mbt` metadata is documented as experimental and may change between Quint versions.
 
@@ -227,9 +236,13 @@ Additional implementation constraints:
 just fmt          # format MoonBit source
 just --fmt        # format the justfile
 just fmt-check    # verify MoonBit formatting
-just typecheck    # MoonBit type checking with warnings denied
-just test         # 14 portable unit/contract tests
-just integration  # generate and replay real Quint traces
+just typecheck    # all-target MoonBit type checking with warnings denied
+just test-js      # 16 unit/contract tests on JavaScript
+just test-wasm    # the same 16 tests on Wasm
+just test-native  # the same 16 tests on native
+just test         # run all three runtime test suites
+just wasm-demo    # replay an embedded ITF trace in Wasm
+just integration  # generate and replay real Quint traces on native
 just check        # run everything
 ```
 

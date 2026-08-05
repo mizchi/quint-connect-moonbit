@@ -48,7 +48,7 @@ run_args=(
 echo "== MoonBit Connect: MoonBit runner generates and replays multiple traces"
 (
   cd "$package_dir"
-  moon run examples/order_checkout/cmd "${run_args[@]}"
+  moon run --target native examples/order_checkout/cmd "${run_args[@]}"
 ) >"$probe_tmp_dir/run-positive.log" 2>&1
 
 rg -q 'MoonBit Connect seed: 0x1234' "$probe_tmp_dir/run-positive.log"
@@ -58,7 +58,7 @@ rg -q 'MoonBit Connect passed: 8 traces, 34 states matched' \
 echo "== MoonBit Connect: broken implementation must fail a generated trace"
 if (
   cd "$package_dir"
-  moon run examples/order_checkout/cmd "${run_args[@]}" --broken-cancel
+  moon run --target native examples/order_checkout/cmd "${run_args[@]}" --broken-cancel
 ) >"$probe_tmp_dir/run-negative.log" 2>&1; then
   echo "Expected MoonBit Connect to reject the broken cancel transition" >&2
   exit 1
@@ -83,7 +83,7 @@ test_args=(
 echo "== MoonBit Connect: named test uses nested state and custom action data"
 (
   cd "$package_dir"
-  QUINT_SEED=0x1234 moon run examples/order_checkout/cmd "${test_args[@]}"
+  QUINT_SEED=0x1234 moon run --target native examples/order_checkout/cmd "${test_args[@]}"
 ) >"$probe_tmp_dir/test-positive.log" 2>&1
 
 rg -q 'MoonBit Connect seed: 0x1234' "$probe_tmp_dir/test-positive.log"
@@ -93,7 +93,7 @@ rg -q 'MoonBit Connect passed: 1 traces, 2 states matched' \
 echo "== MoonBit Connect: broken implementation must fail the named test"
 if (
   cd "$package_dir"
-  QUINT_SEED=0x1234 moon run examples/order_checkout/cmd "${test_args[@]}" --broken-cancel
+  QUINT_SEED=0x1234 moon run --target native examples/order_checkout/cmd "${test_args[@]}" --broken-cancel
 ) >"$probe_tmp_dir/test-negative.log" 2>&1; then
   echo "Expected the named test to reject the broken cancel transition" >&2
   exit 1
@@ -109,7 +109,7 @@ fi
 echo "== BankAccount: nondeterministic amounts and state projection"
 (
   cd "$package_dir"
-  moon run examples/bank_account/cmd
+  moon run --target native examples/bank_account/cmd
 ) >"$probe_tmp_dir/bank-positive.log" 2>&1
 
 rg -q 'BankAccount passed: 8 traces, 72 states matched' \
@@ -118,7 +118,7 @@ rg -q 'BankAccount passed: 8 traces, 72 states matched' \
 echo "== BankAccount: broken withdrawal must diverge"
 if (
   cd "$package_dir"
-  moon run examples/bank_account/cmd -- --broken-withdraw
+  moon run --target native examples/bank_account/cmd -- --broken-withdraw
 ) >"$probe_tmp_dir/bank-negative.log" 2>&1; then
   echo "Expected BankAccount to reject the double withdrawal" >&2
   exit 1
@@ -134,7 +134,7 @@ fi
 echo "== CommandSink: stateless command replay"
 (
   cd "$package_dir"
-  moon run examples/command_sink/cmd
+  moon run --target native examples/command_sink/cmd
 ) >"$probe_tmp_dir/command-positive.log" 2>&1
 
 rg -q 'CommandSink passed: 8 traces, 72 actions executed' \
@@ -143,7 +143,7 @@ rg -q 'CommandSink passed: 8 traces, 72 actions executed' \
 echo "== CommandSink: missing reset mapping must be rejected"
 if (
   cd "$package_dir"
-  moon run examples/command_sink/cmd -- --reject-reset
+  moon run --target native examples/command_sink/cmd -- --reject-reset
 ) >"$probe_tmp_dir/command-negative.log" 2>&1; then
   echo "Expected CommandSink to reject the missing reset mapping" >&2
   exit 1

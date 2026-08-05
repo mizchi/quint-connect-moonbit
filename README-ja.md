@@ -1,7 +1,8 @@
 # quint-connect-moonbit
 
-`quint-connect-moonbit` は、[Quintのモデルベーステスト](https://quint.sh/docs/model-based-testing)を
-MoonBitの実装に接続する実験的なruntime adapterです。MoonBitのpackage名は `mizchi/quint_connect` です。
+`quint-connect-moonbit` は、[Quintのモデルベーステスト](https://quint.sh/docs/model-based-testing)で使う公式Rust
+runtime library [quint-connect](https://github.com/quint-co/quint-connect) のMoonBit版です。MoonBitのpackage名は
+`mizchi/quint_connect` です。このプロジェクトは実験的な実装であり、公式portではありません。
 
 [English version](README.md)
 
@@ -15,9 +16,8 @@ MoonBitの実装に接続する実験的なruntime adapterです。MoonBitのpac
 これにより、生成されたscenarioにおける **specificationと実装のずれ** を検出できます。ただし、可能なすべての
 executionについてMoonBit実装が正しいと証明するものではありません。
 
-このプロジェクトは公式の[Quint Connect](https://github.com/quint-co/quint-connect) Rust libraryと同じruntime
-patternを採用していますが、公式portではありません。Rustのattribute macroやSerde deriveの代わりに、明示的な
-MoonBit functionと実行packageを使用します。
+Rust版と同じく、Quint actionをreplayしてprojectした実装stateを比較します。Rustのattribute macroやSerde deriveの
+代わりに、明示的なMoonBit functionと実行packageを使用します。
 
 ## このリポジトリの目的
 
@@ -74,8 +74,9 @@ nix develop -c just check
 just check
 ```
 
-このcommandは、format check、MoonBit type check、14件のunit test、Quint type check、全exampleのintegration controlを
-実行します。このリポジトリで使用する固定seedでは、integration suiteは次を検査します。
+このcommandは、format check、全targetのMoonBit type check、JavaScript/Wasm/nativeそれぞれ16件のunit/contract
+test、Quint type check、Wasm replay executable、native上での全exampleのintegration controlを実行します。この
+リポジトリで使用する固定seedでは、integration suiteは次を検査します。
 
 | Example | Positive control | Negative control |
 |---|---|---|
@@ -97,9 +98,9 @@ just check
 | [`scripts/check.sh`](scripts/check.sh) | 全exampleのend-to-end regression control |
 | [`justfile`](justfile) | 再現可能なformat、type check、unit test、integration task |
 
-再利用可能なpackageは `mizchi/quint_connect` です。process実行はnative専用の
-`mizchi/quint_connect/runner` packageへ分離しています。そのためreplay kernelはportableなまま維持され、JS targetで
-unit testできます。
+再利用可能なpackageは `mizchi/quint_connect` です。ITF decoderとreplay kernelはJavaScript、Wasm、nativeで
+testします。process実行はnative専用の `mizchi/quint_connect/runner` packageへ分離しています。native executableは
+Quintを起動してtraceを生成し、Wasm executableはhostから渡された、または埋め込まれたITFをreplayします。
 
 ## Core API
 
@@ -110,6 +111,8 @@ unit testできます。
 - `TraceConfig.state_path` は、domain adapterがdecodeするmodel stateを選択します。
 - `TraceConfig.nondet_path` は、action tagと引数を含むcustom Quint variantを選択します。
 - `required_nondet` と `optional_nondet` は、Quintの `Some` / `None` をnormalizeした後、名前つきchoiceをdecodeします。
+- `decode_itf_bigint` は、canonicalなITF `#bigint` 表現をprecision lossなしにdecodeします。
+- `decode_itf_int` は、MoonBitの32-bit `Int` rangeを確認してからITF integerを変換します。
 
 parserはdomain stateを意図的に `Json` のまま保持します。各domain adapterは、比較するfieldを明示的にdecodeする必要が
 あります。reviewされていない自動変換を、信頼できるcontractの一部として扱わないためです。
@@ -141,6 +144,9 @@ dispatcher、API client、その他のadapterに有用です。rejectされたac
 - `runner.generate_run` と `runner.generate_test` はQuintを起動し、生成された全ITF fileを収集してparseします。
 - CLI seedの優先順位は、command-line seed、`QUINT_SEED`、自動生成seedの順に明示されています。
 
+runnerにはnativeのprocess/file system APIが必要です。browserまたはserver-side Wasm hostでは、ITF JSONを別経路で取得し、
+`parse_itf` または `parse_itf_with_config` へ渡します。replay自体はnative I/Oを必要としません。
+
 example executableはdefaultでTypeScript simulator backendを使用します。OrderCheckout CLIは `--backend rust` も
 受けつけますが、このリポジトリで検査する再現可能なbaselineはTypeScript backendです。
 
@@ -166,7 +172,7 @@ mappingと比較処理が実際に機能していることを示せません。
 | Example | 学べること |
 |---|---|
 | [OrderCheckout](examples/order_checkout/) | lifecycle transition、setとvariant、nondeterministic item選択、generated trace、named trace、nested projection |
-| [BankAccount](examples/bank_account/) | nondeterministic choiceによるinteger引数、Quint `#bigint` decoding、小さなstate projection |
+| [BankAccount](examples/bank_account/) | integer引数、Quint `#bigint` decoding、小さなstate projection、埋め込みITFのWasm replay |
 | [CommandSink](examples/command_sink/) | stateless action replay、不完全なcommand mappingの検出 |
 
 各exampleには次が含まれます。
@@ -176,6 +182,8 @@ mappingと比較処理が実際に機能していることを示せません。
 - `cmd/` 以下の実行可能なnative executable
 - MoonBit contract test
 - integration scriptが使用する意図的に壊したmode
+
+BankAccountには、native runnerを使わず埋め込みtraceをreplayするWasm executableも含まれます。
 
 ## 公式Quint Connectとの関係
 
@@ -213,9 +221,9 @@ suiteが成功したときに言えること:
 その他の実装上の制約:
 
 - Quintのset、map、tuple、variantは、domain adapterがdecodeするまでraw ITF JSONのままです。
-- Quint integerは通常 `{ "#bigint": "..." }` とencodeされます。BankAccountに明示的なdecoderがあります。
-- MoonBit coreのJSON numberは `Double` を使うため、`2^53` を超えるintegerにはfloating-point変換ではなく、
-  string / `#bigint` decoderが必要です。
+- ITFでは大小を問わず、すべてのintegerを `{ "#bigint": "..." }` と表現します。decoderはJSON numberを拒否します。
+- `decode_itf_bigint` はMoonBit coreの `BigInt` を使い、JavaScript/Wasm/nativeで `2^53 + 1` のような値も保持します。
+- `decode_itf_int` は明示的なnarrowing operationです。任意精度が必要なdomainでは変換せず `BigInt` を保持します。
 - Action callbackはsynchronousです。asyncなproduction operationには追加のdriver abstractionが必要です。
 - Quintの `--mbt` metadataはexperimentalと記載されており、Quint version間で変わる可能性があります。
 
@@ -225,9 +233,13 @@ suiteが成功したときに言えること:
 just fmt          # MoonBit sourceをformat
 just --fmt        # justfileをformat
 just fmt-check    # MoonBit formatを検査
-just typecheck    # warningを拒否してMoonBitをtype check
-just test         # portableなunit / contract test 14件
-just integration  # 実際のQuint traceを生成してreplay
+just typecheck    # warningを拒否して全targetをMoonBit type check
+just test-js      # JavaScriptでunit / contract test 16件
+just test-wasm    # Wasmで同じ16件を実行
+just test-native  # nativeで同じ16件を実行
+just test         # 3つのruntime test suiteを実行
+just wasm-demo    # Wasmで埋め込みITF traceをreplay
+just integration  # nativeで実際のQuint traceを生成してreplay
 just check        # すべてを実行
 ```
 

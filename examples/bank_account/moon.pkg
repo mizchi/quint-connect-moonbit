@@ -2,5 +2,4 @@ import {
   "mizchi/quint_connect",
   "moonbitlang/core/debug",
   "moonbitlang/core/json",
-  "moonbitlang/core/string",
 }

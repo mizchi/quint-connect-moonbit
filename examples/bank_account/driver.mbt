@@ -10,28 +10,10 @@ pub fn new_bank_driver(broken_withdraw? : Bool = false) -> BankDriver {
 }
 
 ///|
-fn decode_itf_int(value : Json) -> Result[Int, String] {
-  match value {
-    Number(number, ..) => Ok(number.to_int())
-    Object(fields) =>
-      match fields.get("#bigint") {
-        Some(String(text)) => {
-          let parsed = @string.parse_int(text) catch {
-            _ => return Err("invalid ITF #bigint \{text}")
-          }
-          Ok(parsed)
-        }
-        _ => Err("expected an ITF integer")
-      }
-    _ => Err("expected an ITF integer")
-  }
-}
-
-///|
 fn decode_amount(picks : Json) -> Result[Int, String] {
   match @quint_connect.required_nondet(picks, "amount") {
     Ok(value) => {
-      let amount = match decode_itf_int(value) {
+      let amount = match @quint_connect.decode_itf_int(value) {
         Ok(amount) => amount
         Err(reason) => return Err(reason)
       }
@@ -82,7 +64,7 @@ fn decode_balance(value : Json) -> Result[Int, String] {
     return Err("BankAccount state must be an object")
   }
   match fields.get("balance") {
-    Some(balance) => decode_itf_int(balance)
+    Some(balance) => @quint_connect.decode_itf_int(balance)
     _ => Err("BankAccount state is missing integer balance")
   }
 }

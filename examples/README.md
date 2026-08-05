@@ -12,13 +12,16 @@ Every example includes:
 - contract tests with a small hand-written trace;
 - a deliberately broken mode that proves the integration check can detect the intended mismatch.
 
+BankAccount also includes a Wasm executable that replays embedded ITF without process or filesystem access.
+
 Run all examples from the repository root:
 
 ```sh
 nix develop -c just integration
 ```
 
-Run the complete project check, including formatting, type checking, and 14 unit tests:
+Run the complete project check, including formatting, all-target type checking, and 16 unit/contract tests on
+JavaScript, Wasm, and native:
 
 ```sh
 nix develop -c just check

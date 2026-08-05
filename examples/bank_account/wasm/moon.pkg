@@ -1,0 +1,9 @@
+import {
+  "mizchi/quint_connect",
+  "mizchi/quint_connect/examples/bank_account",
+  "moonbitlang/core/debug",
+}
+
+supported_targets = "+wasm"
+
+pkgtype(kind: "executable")

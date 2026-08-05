@@ -37,7 +37,7 @@ It does **not** invoke an expected-state decoder or compare an implementation sn
 From the repository root:
 
 ```sh
-nix develop -c moon run examples/command_sink/cmd
+nix develop -c moon run --target native examples/command_sink/cmd
 ```
 
 Expected result with the fixed seed `0x1234`:
@@ -51,7 +51,7 @@ The result counts executed trace states as actions, including each trace's `init
 ## Negative control
 
 ```sh
-nix develop -c moon run examples/command_sink/cmd -- --reject-reset
+nix develop -c moon run --target native examples/command_sink/cmd -- --reject-reset
 ```
 
 The broken driver refuses to map `reset`. The generated trace reaches that action and fails with:

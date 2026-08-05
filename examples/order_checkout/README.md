@@ -65,7 +65,7 @@ nix develop
 Then run:
 
 ```sh
-moon run examples/order_checkout/cmd run \
+moon run --target native examples/order_checkout/cmd run \
   examples/order_checkout/OrderCheckout.qnt \
   --main OrderCheckout \
   --max-samples 8 \
@@ -85,7 +85,7 @@ all actions, and compares `OrderSnapshot` after every step.
 ## Run the named nested-state scenario
 
 ```sh
-moon run examples/order_checkout/cmd test \
+moon run --target native examples/order_checkout/cmd test \
   examples/order_checkout/OrderCheckoutNamed.qnt \
   --main OrderCheckoutNamed \
   --test cancelTest \

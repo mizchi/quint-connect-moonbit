@@ -136,6 +136,47 @@ pub fn required_nondet(picks : Json, name : String) -> Result[Json, String] {
 }
 
 ///|
+/// Decode the canonical ITF integer representation without losing precision.
+///
+/// ITF requires every integer, regardless of size, to use the #bigint tagged
+/// object. JSON numbers are deliberately rejected so this contract behaves
+/// identically on JavaScript and native runtimes.
+pub fn decode_itf_bigint(value : Json) -> Result[@bigint.BigInt, String] {
+  guard value is Object(fields) && fields.get("#bigint") is Some(String(text)) else {
+    return Err("expected an ITF #bigint string")
+  }
+  if text.is_empty() {
+    return Err("invalid ITF #bigint \{text}")
+  }
+  let first_digit = if text.unsafe_get(0) == '-' { 1 } else { 0 }
+  if first_digit == text.length() {
+    return Err("invalid ITF #bigint \{text}")
+  }
+  for index = first_digit; index < text.length(); index = index + 1 {
+    let character = text.unsafe_get(index)
+    if character < '0' || character > '9' {
+      return Err("invalid ITF #bigint \{text}")
+    }
+  }
+  Ok(@bigint.BigInt::from_string(text))
+}
+
+///|
+/// Decode an ITF integer only when it fits MoonBit's 32-bit Int domain.
+pub fn decode_itf_int(value : Json) -> Result[Int, String] {
+  let integer = match decode_itf_bigint(value) {
+    Ok(integer) => integer
+    Err(reason) => return Err(reason)
+  }
+  if integer.compare_int(@int.MIN_VALUE) < 0 ||
+    integer.compare_int(@int.MAX_VALUE) > 0 {
+    Err("ITF integer \{integer} is outside MoonBit Int range")
+  } else {
+    Ok(integer.to_int())
+  }
+}
+
+///|
 fn decode_itf_state(
   value : Json,
   fallback_index : Int,

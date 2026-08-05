@@ -55,6 +55,40 @@ test "ITF decoder rejects a trace without states" {
 }
 
 ///|
+test "ITF bigint decoding is lossless across runtimes" {
+  let encoded = Json::object({ "#bigint": Json::string("9007199254740993") })
+  let decoded = @quint_connect.decode_itf_bigint(encoded).unwrap()
+  assert_eq(decoded.to_string(), "9007199254740993")
+  match @quint_connect.decode_itf_bigint(Json::number(4.0)) {
+    Err(reason) => assert_true(reason.contains("#bigint"))
+    Ok(_) => fail("ITF integers must not use JSON numbers")
+  }
+  let malformed = Json::object({ "#bigint": Json::string("12x") })
+  match @quint_connect.decode_itf_bigint(malformed) {
+    Err(reason) => assert_true(reason.contains("invalid ITF #bigint"))
+    Ok(_) => fail("malformed ITF integers must be rejected without a panic")
+  }
+}
+
+///|
+test "ITF int decoding checks the MoonBit Int range" {
+  let maximum = Json::object({ "#bigint": Json::string("2147483647") })
+  assert_eq(@quint_connect.decode_itf_int(maximum), Ok(2147483647))
+  let minimum = Json::object({ "#bigint": Json::string("-2147483648") })
+  assert_eq(@quint_connect.decode_itf_int(minimum), Ok(-2147483648))
+  let overflow = Json::object({ "#bigint": Json::string("2147483648") })
+  match @quint_connect.decode_itf_int(overflow) {
+    Err(reason) => assert_true(reason.contains("outside MoonBit Int range"))
+    Ok(_) => fail("an out-of-range ITF integer must not wrap or truncate")
+  }
+  let underflow = Json::object({ "#bigint": Json::string("-2147483649") })
+  match @quint_connect.decode_itf_int(underflow) {
+    Err(reason) => assert_true(reason.contains("outside MoonBit Int range"))
+    Ok(_) => fail("an out-of-range ITF integer must not wrap or truncate")
+  }
+}
+
+///|
 test "driver mapping failures stay distinct from state divergence" {
   let trace : @quint_connect.ItfTrace = {
     states: [
